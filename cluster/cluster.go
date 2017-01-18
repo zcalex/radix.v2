@@ -198,11 +198,7 @@ func (c *Cluster) spin() {
 // is set. If the given pool couldn't be used a connection from a random pool
 // will (attempt) to be returned
 func (c *Cluster) getConn(key, addr string) (*redis.Client, error) {
-	type resp struct {
-		conn *redis.Client
-		err  error
-	}
-	respCh := make(chan *resp)
+	respCh := make(chan *pool.Pool)
 	c.callCh <- func(c *Cluster) {
 		if key != "" {
 			addr = keyToAddr(key, &c.mapping)
@@ -213,48 +209,31 @@ func (c *Cluster) getConn(key, addr string) (*redis.Client, error) {
 		if !ok {
 			if p, err = c.newPool(addr, false); err == nil {
 				c.pools[addr] = p
+			} else {
+				p = c.getRandomPoolInner()
 			}
 		}
-
-		var conn *redis.Client
-		if err == nil {
-			conn, err = p.Get()
-			if err == nil {
-				respCh <- &resp{conn, nil}
-				return
-			}
-		}
-
-		// If there's an error try one more time retrieving from a random pool
-		// before bailing
-		p = c.getRandomPoolInner()
-		if p == nil {
-			respCh <- &resp{err: errNoPools}
-			return
-		}
-		conn, err = p.Get()
-		if err != nil {
-			respCh <- &resp{err: err}
-			return
-		}
-
-		respCh <- &resp{conn, nil}
+		respCh <- p
 	}
-	r := <-respCh
-	return r.conn, r.err
+
+	return (<-respCh).Get()
 }
 
 // Put putss the connection back in its pool. To be used alongside any of the
 // Get* methods once use of the redis.Client is done
 func (c *Cluster) Put(conn *redis.Client) {
+	respCh := make(chan *pool.Pool)
 	c.callCh <- func(c *Cluster) {
-		p := c.pools[conn.Addr]
-		if p == nil {
-			conn.Close()
-			return
-		}
-
+		respCh <- c.pools[conn.Addr]
+	}
+	// TODO there's a connection leak race condition in here, if between the
+	// previous step and the next the pool was Empty'd, then we're about to Put
+	// into an empty Pool which presumably won't be used anymore. That
+	// connection will just never be closed
+	if p := <-respCh; p != nil {
 		p.Put(conn)
+	} else {
+		conn.Close()
 	}
 }
 
