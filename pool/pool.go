@@ -34,7 +34,7 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 			for _, client = range pool {
 				client.Close()
 			}
-			pool = pool[0:]
+			pool = pool[:0]
 			break
 		}
 		pool = append(pool, client)
