@@ -39,8 +39,6 @@ var (
 	// ErrBadCmdNoKey is an error reply returned when no key is given to the Cmd
 	// method
 	ErrBadCmdNoKey = errors.New("bad command, no key")
-
-	errNoPools = errors.New("no pools to pull from")
 )
 
 // DialFunc is a function which can be incorporated into Opts. Note that network
@@ -51,7 +49,7 @@ type DialFunc func(network, addr string) (*redis.Client, error)
 type Cluster struct {
 	o Opts
 	mapping
-	pools         map[string]*pool.Pool
+	pools         map[string]clusterPool
 	poolThrottles map[string]<-chan time.Time
 	resetThrottle *time.Ticker
 	callCh        chan func(*Cluster)
@@ -138,7 +136,7 @@ func NewWithOpts(o Opts) (*Cluster, error) {
 	c := Cluster{
 		o:             o,
 		mapping:       mapping{},
-		pools:         map[string]*pool.Pool{},
+		pools:         map[string]clusterPool{},
 		poolThrottles: map[string]<-chan time.Time{},
 		callCh:        make(chan func(*Cluster)),
 		stopCh:        make(chan struct{}),
@@ -159,7 +157,7 @@ func NewWithOpts(o Opts) (*Cluster, error) {
 	return &c, nil
 }
 
-func (c *Cluster) newPool(addr string, clearThrottle bool) (*pool.Pool, error) {
+func (c *Cluster) newPool(addr string, clearThrottle bool) (clusterPool, error) {
 	if clearThrottle {
 		delete(c.poolThrottles, addr)
 	} else if throttle, ok := c.poolThrottles[addr]; ok {
@@ -167,7 +165,7 @@ func (c *Cluster) newPool(addr string, clearThrottle bool) (*pool.Pool, error) {
 		case <-throttle:
 			delete(c.poolThrottles, addr)
 		default:
-			return nil, fmt.Errorf("newPool(%s) throttled", addr)
+			return clusterPool{}, fmt.Errorf("newPool(%s) throttled", addr)
 		}
 	}
 
@@ -177,9 +175,10 @@ func (c *Cluster) newPool(addr string, clearThrottle bool) (*pool.Pool, error) {
 	p, err := pool.NewCustom("tcp", addr, c.o.PoolSize, df)
 	if err != nil {
 		c.poolThrottles[addr] = time.After(c.o.PoolThrottle)
-		return nil, err
+		return clusterPool{}, err
 	}
-	return p, err
+
+	return newClusterPool(p), nil
 }
 
 // Anything which requires creating/deleting pools must be done in here
@@ -198,11 +197,7 @@ func (c *Cluster) spin() {
 // is set. If the given pool couldn't be used a connection from a random pool
 // will (attempt) to be returned
 func (c *Cluster) getConn(key, addr string) (*redis.Client, error) {
-	type resp struct {
-		conn *redis.Client
-		err  error
-	}
-	respCh := make(chan *resp)
+	respCh := make(chan clusterPool)
 	c.callCh <- func(c *Cluster) {
 		if key != "" {
 			addr = keyToAddr(key, &c.mapping)
@@ -213,56 +208,35 @@ func (c *Cluster) getConn(key, addr string) (*redis.Client, error) {
 		if !ok {
 			if p, err = c.newPool(addr, false); err == nil {
 				c.pools[addr] = p
+			} else {
+				p = c.getRandomPoolInner()
 			}
 		}
-
-		var conn *redis.Client
-		if err == nil {
-			conn, err = p.Get()
-			if err == nil {
-				respCh <- &resp{conn, nil}
-				return
-			}
-		}
-
-		// If there's an error try one more time retrieving from a random pool
-		// before bailing
-		p = c.getRandomPoolInner()
-		if p == nil {
-			respCh <- &resp{err: errNoPools}
-			return
-		}
-		conn, err = p.Get()
-		if err != nil {
-			respCh <- &resp{err: err}
-			return
-		}
-
-		respCh <- &resp{conn, nil}
+		respCh <- p
 	}
-	r := <-respCh
-	return r.conn, r.err
+
+	return (<-respCh).Get()
 }
 
 // Put putss the connection back in its pool. To be used alongside any of the
 // Get* methods once use of the redis.Client is done
 func (c *Cluster) Put(conn *redis.Client) {
+	respCh := make(chan clusterPool)
 	c.callCh <- func(c *Cluster) {
-		p := c.pools[conn.Addr]
-		if p == nil {
-			conn.Close()
-			return
-		}
-
+		respCh <- c.pools[conn.Addr]
+	}
+	if p := <-respCh; p.Pool != nil {
 		p.Put(conn)
+	} else {
+		conn.Close()
 	}
 }
 
-func (c *Cluster) getRandomPoolInner() *pool.Pool {
+func (c *Cluster) getRandomPoolInner() clusterPool {
 	for _, pool := range c.pools {
 		return pool
 	}
-	return nil
+	return clusterPool{}
 }
 
 // Reset will re-retrieve the cluster topology and set up/teardown connections
@@ -296,14 +270,14 @@ func (c *Cluster) resetInner() error {
 	}
 
 	p := c.getRandomPoolInner()
-	if p == nil {
+	if p.Pool == nil {
 		return fmt.Errorf("no available nodes to call CLUSTER SLOTS on")
 	}
 
 	return c.resetInnerUsingPool(p)
 }
 
-func (c *Cluster) resetInnerUsingPool(p *pool.Pool) error {
+func (c *Cluster) resetInnerUsingPool(p clusterPool) error {
 
 	// If we move the throttle check to be in here we'll have to fix the test in
 	// TestReset, since it depends on being able to call Reset right after
@@ -315,7 +289,7 @@ func (c *Cluster) resetInnerUsingPool(p *pool.Pool) error {
 	}
 	defer p.Put(client)
 
-	pools := map[string]*pool.Pool{}
+	pools := map[string]clusterPool{}
 
 	elems, err := client.Cmd("CLUSTER", "SLOTS").Array()
 	if err != nil {
@@ -326,7 +300,7 @@ func (c *Cluster) resetInnerUsingPool(p *pool.Pool) error {
 
 	var start, end, port int
 	var ip, slotAddr string
-	var slotPool *pool.Pool
+	var slotPool clusterPool
 	var ok, changed bool
 	for _, slotGroup := range elems {
 		slotElems, err := slotGroup.Array()
