@@ -65,6 +65,7 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 			select {
 			case <-p.stopCh:
 				close(p.stopCh)
+				return
 			case <-tick.C:
 				p.Cmd("PING")
 			}
