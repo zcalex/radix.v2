@@ -56,6 +56,10 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 		p.pool <- pool[i]
 	}
 
+	if size < 1 {
+		return &p, err
+	}
+
 	// set up a go-routine which will periodically ping connections in the pool.
 	// if the pool is idle every connection will be hit once every 10 seconds.
 	go func() {
