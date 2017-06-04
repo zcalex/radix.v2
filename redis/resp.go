@@ -58,6 +58,7 @@ var (
 	errNotStr   = errors.New("could not convert to string")
 	errNotInt   = errors.New("could not convert to int")
 	errNotArray = errors.New("could not convert to array")
+	errResNil   = errors.New("response is nil")
 )
 
 // Resp represents a single response or message being sent to/from a redis
@@ -281,7 +282,13 @@ func (r *Resp) WriteTo(w io.Writer) (int64, error) {
 func (r *Resp) Bytes() ([]byte, error) {
 	if r.Err != nil {
 		return nil, r.Err
-	} else if !r.IsType(Str) {
+	} 
+	
+	if r.IsType(Nil) {
+		return nil, errResNil
+	}
+	
+	if !r.IsType(Str) {
 		return nil, errBadType
 	}
 
@@ -315,6 +322,11 @@ func (r *Resp) Int64() (int64, error) {
 	if r.Err != nil {
 		return 0, r.Err
 	}
+	
+	if r.IsType(Nil) {
+		return 0, errResNil
+	}
+		
 	if i, ok := r.val.(int64); ok {
 		return i, nil
 	}
