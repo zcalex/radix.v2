@@ -388,6 +388,11 @@ func (c *Cluster) resetInnerUsingPool(p clusterPool) error {
 // command's reply. The command *must* have a key parameter (i.e. len(args) >=
 // 1). If any MOVED or ASK errors are returned they will be transparently
 // handled by this method.
+//
+// NOTE if you're doing any lua or scan operations through this method you might
+// save yourself some time and effort by checking out the LuaEval and NewScanner
+// functions in the util package. They properly handle the cluster client being
+// used.
 func (c *Cluster) Cmd(cmd string, args ...interface{}) *redis.Resp {
 	if len(args) < 1 {
 		return errorResp(ErrBadCmdNoKey)
