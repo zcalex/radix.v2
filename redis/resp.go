@@ -58,7 +58,7 @@ var (
 	errNotStr   = errors.New("could not convert to string")
 	errNotInt   = errors.New("could not convert to int")
 	errNotArray = errors.New("could not convert to array")
-	errResNil   = errors.New("response is nil")
+	ErrRespNil  = errors.New("response is nil")
 )
 
 // Resp represents a single response or message being sent to/from a redis
@@ -285,7 +285,7 @@ func (r *Resp) Bytes() ([]byte, error) {
 	} 
 	
 	if r.IsType(Nil) {
-		return nil, errResNil
+		return nil, ErrRespNil
 	}
 	
 	if !r.IsType(Str) {
@@ -324,7 +324,7 @@ func (r *Resp) Int64() (int64, error) {
 	}
 	
 	if r.IsType(Nil) {
-		return 0, errResNil
+		return 0, ErrRespNil
 	}
 		
 	if i, ok := r.val.(int64); ok {
