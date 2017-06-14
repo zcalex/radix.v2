@@ -23,8 +23,6 @@ import (
 	"github.com/mediocregopher/radix.v2/redis"
 )
 
-const numSlots = 16384
-
 type mapping [numSlots]string
 
 func errorResp(err error) *redis.Resp {
@@ -535,13 +533,7 @@ func redirectInfo(msg string) (int, string) {
 }
 
 func keyToAddr(key string, mapping *mapping) string {
-	if start := strings.Index(key, "{"); start >= 0 {
-		if end := strings.Index(key[start+2:], "}"); end >= 0 {
-			key = key[start+1 : start+2+end]
-		}
-	}
-	i := CRC16([]byte(key)) % numSlots
-	return mapping[i]
+	return mapping[Slot(key)]
 }
 
 // GetForKey returns the Client which *ought* to handle the given key, based
