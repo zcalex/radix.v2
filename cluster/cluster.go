@@ -23,7 +23,7 @@ import (
 	"github.com/mediocregopher/radix.v2/redis"
 )
 
-type mapping [numSlots]string
+type mapping [NumSlots]string
 
 func errorResp(err error) *redis.Resp {
 	return redis.NewResp(err)

@@ -37,7 +37,8 @@ var tab = [256]uint16{
 	0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
 }
 
-const numSlots = 16384
+// NumSlots is the number of slots keys are sharded into in a redis cluster
+const NumSlots = 16384
 
 // CRC16 returns checksum for a given set of bytes based on the crc algorithm
 // defined for hashing redis keys in a cluster setup
@@ -58,5 +59,5 @@ func Slot(key string) uint16 {
 			key = key[start+1 : start+2+end]
 		}
 	}
-	return CRC16([]byte(key)) % numSlots
+	return CRC16([]byte(key)) % NumSlots
 }

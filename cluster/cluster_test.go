@@ -133,7 +133,7 @@ func TestCmdMiss(t *T) {
 func TestCmdAsk(t *T) {
 	cluster := getCluster(t)
 	key := keyForNode(cluster, addr1)
-	slot := CRC16([]byte(key)) % numSlots
+	slot := CRC16([]byte(key)) % NumSlots
 
 	// just in case
 	assert.Nil(t, cluster.Cmd("DEL", key).Err)
