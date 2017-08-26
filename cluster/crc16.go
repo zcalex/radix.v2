@@ -55,8 +55,8 @@ func CRC16(buf []byte) uint16 {
 // account curly braces within the key as per the spec.
 func Slot(key string) uint16 {
 	if start := strings.Index(key, "{"); start >= 0 {
-		if end := strings.Index(key[start+2:], "}"); end >= 0 {
-			key = key[start+1 : start+2+end]
+		if end := strings.Index(key[start+1:], "}"); end > 0 {
+			key = key[start+1 : start+1+end]
 		}
 	}
 	return CRC16([]byte(key)) % NumSlots
