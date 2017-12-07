@@ -1,53 +1,53 @@
 # Radix
 
-[![Build Status](https://travis-ci.org/mediocregopher/radix.v2.svg)](https://travis-ci.org/mediocregopher/radix.v2)
-[![GoDoc](https://godoc.org/github.com/mediocregopher/radix.v2?status.svg)](https://godoc.org/github.com/mediocregopher/radix.v2)
+[![Build Status](https://travis-ci.org/GerardRodes/radix.v2.svg)](https://travis-ci.org/GerardRodes/radix.v2)
+[![GoDoc](https://godoc.org/github.com/GerardRodes/radix.v2?status.svg)](https://godoc.org/github.com/GerardRodes/radix.v2)
 
 Radix is a minimalistic [Redis][redis] client for Go. It is broken up into
 small, single-purpose packages for ease of use.
 
-* [redis](http://godoc.org/github.com/mediocregopher/radix.v2/redis) - A wrapper
+* [redis](http://godoc.org/github.com/GerardRodes/radix.v2/redis) - A wrapper
   around a single, *non-thread-safe* redis connection. Supports normal
   commands/response as well as pipelining.
 
-* [pool](http://godoc.org/github.com/mediocregopher/radix.v2/pool) - a simple,
+* [pool](http://godoc.org/github.com/GerardRodes/radix.v2/pool) - a simple,
   automatically expanding/cleaning connection pool. If you have multiple
   go-routines using the same redis instance you'll need this.
 
-* [pubsub](http://godoc.org/github.com/mediocregopher/radix.v2/pubsub) - a
+* [pubsub](http://godoc.org/github.com/GerardRodes/radix.v2/pubsub) - a
   simple wrapper providing convenient access to Redis Pub/Sub functionality.
 
-* [sentinel](http://godoc.org/github.com/mediocregopher/radix.v2/sentinel) - a
+* [sentinel](http://godoc.org/github.com/GerardRodes/radix.v2/sentinel) - a
   client for [redis sentinel][sentinel] which acts as a connection pool for a
   cluster of redis nodes. A sentinel client connects to a sentinel instance and
   any master redis instances that instance is monitoring. If a master becomes
   unavailable, the sentinel client will automatically start distributing
   connections from the slave chosen by the sentinel instance.
 
-* [cluster](http://godoc.org/github.com/mediocregopher/radix.v2/cluster) - a
+* [cluster](http://godoc.org/github.com/GerardRodes/radix.v2/cluster) - a
   client for a [redis cluster][cluster] which automatically handles interacting
   with a redis cluster, transparently handling redirects and pooling. This
   client keeps a mapping of slots to nodes internally, and automatically keeps
   it up-to-date.
 
-* [util](http://godoc.org/github.com/mediocregopher/radix.v2/util) - a
+* [util](http://godoc.org/github.com/GerardRodes/radix.v2/util) - a
   package containing a number of helper methods for doing common tasks with the
   radix package, such as SCANing either a single redis instance or every one in
   a cluster, or executing server-side lua
 
 ## V3
 
-If you're so inclined, [radix.v3](https://github.com/mediocregopher/radix.v3) is
+If you're so inclined, [radix.v3](https://github.com/GerardRodes/radix.v3) is
 available for beta testing. If you like v2 you'll probably love v3, it's got
 everything v2 does and is faster, cleaner, and more flexible. Check it out!
 
 ## Installation
 
-    go get github.com/mediocregopher/radix.v2/...
+    go get github.com/GerardRodes/radix.v2/...
 
 ## Testing
 
-    go test github.com/mediocregopher/radix.v2/...
+    go test github.com/GerardRodes/radix.v2/...
 
 The test action assumes you have the following running:
 
