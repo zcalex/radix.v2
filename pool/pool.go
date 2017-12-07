@@ -41,6 +41,10 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 		stopCh:     make(chan bool),
 	}
 
+	if size < 1 {
+		return &p, nil
+	}
+
 	// set up a go-routine which will periodically ping connections in the pool.
 	// if the pool is idle every connection will be hit once every 10 seconds.
 	// we do some weird defer/wait stuff to ensure this always gets started no
@@ -61,10 +65,6 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 			}
 		}
 	}()
-
-	if size < 1 {
-		return &p, nil
-	}
 
 	mkConn := func() error {
 		client, err := df(network, addr)
