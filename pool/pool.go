@@ -7,13 +7,21 @@ import (
 	"github.com/mediocregopher/radix.v2/redis"
 )
 
-// Pool is a simple connection pool for redis Clients. It will create a small
-// pool of initial connections, and if more connections are needed they will be
+// Pool is a connection pool for redis Clients. It will create a small pool of
+// initial connections, and if more connections are needed they will be
 // created on demand. If a connection is Put back and the pool is full it will
-// be closed.
+// be closed. A reserve pool is kept alongside the main pool to prevent
+// connection churn. If the main pool is filled, a connection is put into the
+// reserve pool and they're slowly (over 100 seconds) evicted from the reserve.
 type Pool struct {
-	pool chan *redis.Client
-	df   DialFunc
+	pool        chan *redis.Client
+	reservePool chan *redis.Client
+	df          DialFunc
+
+	po opts
+
+	// limited channel is read whenever we attempt to make a new client
+	limited chan bool
 
 	initDoneCh chan bool // used for tests
 	stopCh     chan bool
@@ -30,39 +38,121 @@ type DialFunc func(network, addr string) (*redis.Client, error)
 // NewCustom is like New except you can specify a DialFunc which will be
 // used when creating new connections for the pool. The common use-case is to do
 // authentication for new connections.
-func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
-	p := Pool{
-		Network:    network,
-		Addr:       addr,
-		pool:       make(chan *redis.Client, size),
-		df:         df,
-		initDoneCh: make(chan bool),
-		stopCh:     make(chan bool),
+func NewCustom(network, addr string, size int, df DialFunc, os ...Opt) (*Pool, error) {
+	var defaultPoolOpts []Opt
+	// if pool size is 0 don't do any pinging, cause there'd be no point
+	if size > 0 {
+		defaultPoolOpts = append(defaultPoolOpts, PingInterval(10*time.Second/time.Duration(size)))
 	}
 
-	if size < 1 {
-		return &p, nil
+	var po opts
+	for _, opt := range append(defaultPoolOpts, os...) {
+		opt(&po)
+	}
+
+	p := Pool{
+		Network:     network,
+		Addr:        addr,
+		po:          po,
+		pool:        make(chan *redis.Client, size),
+		reservePool: make(chan *redis.Client, po.overflowSize),
+		limited:     make(chan bool, po.createLimitBuffer),
+		df:          df,
+		initDoneCh:  make(chan bool),
+		stopCh:      make(chan bool),
+	}
+
+	// we do some weird defer/wait stuff to ensure thsee goroutines alway start no
+	// matter what happens with the rest of the initialization
+	startTickCh := make(chan struct{})
+	defer close(startTickCh)
+
+	doEvery := func(i time.Duration, do func()) {
+		go func() {
+			tick := time.NewTicker(i)
+			defer tick.Stop()
+			<-startTickCh
+			for {
+				select {
+				case <-p.stopCh:
+					return
+				case <-tick.C:
+					do()
+				}
+			}
+		}()
 	}
 
 	// set up a go-routine which will periodically ping connections in the pool.
 	// if the pool is idle every connection will be hit once every 10 seconds.
-	// we do some weird defer/wait stuff to ensure this always gets started no
-	// matter what happens with the rest of the initialization
-	startTickCh := make(chan struct{})
-	defer close(startTickCh)
-	go func() {
-		tick := time.NewTicker(10 * time.Second / time.Duration(size))
-		defer tick.Stop()
-		<-startTickCh
-		for {
+	if po.pingInterval > 0 {
+		doEvery(po.pingInterval, func() {
+			// instead of using Cmd/Get, which might make a new connection,
+			// we only check from the pool
 			select {
-			case <-p.stopCh:
-				return
-			case <-tick.C:
-				p.Cmd("PING")
+			case conn := <-p.pool:
+				// we don't care if PING errors since Put will handle that
+				conn.Cmd("PING")
+				p.Put(conn)
+			default:
 			}
-		}
-	}()
+		})
+	}
+
+	// additionally, if there are any connections in the reserve pool, they're closed
+	// periodically depending on the drain interval
+	if po.overflowSize > 0 {
+		doEvery(po.overflowDrainInterval, func() {
+			// remove one from the reservePool, if there is any, and try putting it
+			// into the main pool
+			select {
+			case conn := <-p.reservePool:
+				select {
+				case p.pool <- conn:
+				default:
+					// if the main pool is full then just close it
+					conn.Close()
+				}
+			default:
+			}
+		})
+	}
+
+	if po.createLimitInterval > 0 {
+		go func() {
+			// until we're done seeding, allow it to make as fast as possible
+		seedLoop:
+			for {
+				select {
+				case <-p.stopCh:
+					return
+				case <-startTickCh:
+					break seedLoop
+				case p.limited <- true:
+				}
+			}
+
+			// now we only refill the bucket every interval, but we can't use a
+			// ticker because that'll overflow while we're blocked on writing to
+			// the limited channel
+			for {
+				select {
+				case <-time.After(po.createLimitInterval):
+					// now try to fill the bucket but we might block if its already
+					// filled
+					select {
+					case <-p.stopCh:
+						return
+					case p.limited <- true:
+					}
+				case <-p.stopCh:
+					return
+				}
+			}
+		}()
+	} else {
+		close(p.limited)
+	}
 
 	mkConn := func() error {
 		client, err := df(network, addr)
@@ -72,9 +162,11 @@ func NewCustom(network, addr string, size int, df DialFunc) (*Pool, error) {
 		return err
 	}
 
-	// make one connection to make sure the redis instance is actually there
-	if err := mkConn(); err != nil {
-		return &p, err
+	if size > 0 {
+		// make one connection to make sure the redis instance is actually there
+		if err := mkConn(); err != nil {
+			return &p, err
+		}
 	}
 
 	// make the rest of the connections in the background, if any fail it's fine
@@ -102,10 +194,22 @@ func (p *Pool) Get() (*redis.Client, error) {
 	select {
 	case conn := <-p.pool:
 		return conn, nil
+	case conn := <-p.reservePool:
+		return conn, nil
 	case <-p.stopCh:
 		return nil, errors.New("pool emptied")
 	default:
-		return p.df(p.Network, p.Addr)
+		// we need a separate select here since it's indeterminate which case go
+		// will select and we want to always prefer pools over creating a new
+		// connection
+		select {
+		case conn := <-p.pool:
+			return conn, nil
+		case conn := <-p.reservePool:
+			return conn, nil
+		case <-p.limited:
+			return p.df(p.Network, p.Addr)
+		}
 	}
 }
 
@@ -125,7 +229,19 @@ func (p *Pool) Put(conn *redis.Client) {
 		select {
 		case p.pool <- conn:
 		default:
-			conn.Close()
+			// if there isn't any overflow allowed, immediately close
+			if p.po.overflowSize == 0 {
+				conn.Close()
+				return
+			}
+
+			// we need a separate select here since it's indeterminate which case go
+			// will select and we want to always prefer the main pool over the reserve
+			select {
+			case p.reservePool <- conn:
+			default:
+				conn.Close()
+			}
 		}
 	}
 }
@@ -159,6 +275,8 @@ func (p *Pool) Empty() {
 		select {
 		case conn = <-p.pool:
 			conn.Close()
+		case conn = <-p.reservePool:
+			conn.Close()
 		default:
 			return
 		}
@@ -167,7 +285,7 @@ func (p *Pool) Empty() {
 
 // Avail returns the number of connections currently available to be gotten from
 // the Pool using Get. If the number is zero then subsequent calls to Get will
-// be creating new connections on the fly
+// be creating new connections on the fly.
 func (p *Pool) Avail() int {
-	return len(p.pool)
+	return len(p.pool) + len(p.reservePool)
 }
