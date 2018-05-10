@@ -95,6 +95,11 @@ type Opts struct {
 	// each redis cluster instance. The common use-case is to do authentication
 	// for new connections. Defaults to using redis.DialTimeout if not set.
 	Dialer DialFunc
+
+	// The max redirect count of cluster. Default is 2.
+	// If redis-nodes will work and do rebalance(moving slots) at the same time,
+	// configure a bigger number is a good choice.
+	MaxRedirectCount int
 }
 
 // New will perform the following steps to initialize:
@@ -132,6 +137,9 @@ func NewWithOpts(o Opts) (*Cluster, error) {
 		o.Dialer = func(_, addr string) (*redis.Client, error) {
 			return redis.DialTimeout("tcp", addr, o.Timeout)
 		}
+	}
+	if o.MaxRedirectCount == 0 {
+		o.MaxRedirectCount = 2
 	}
 
 	c := Cluster{
@@ -409,7 +417,7 @@ func (c *Cluster) Cmd(cmd string, args ...interface{}) *redis.Resp {
 		return errorResp(err)
 	}
 
-	return c.clientCmd(client, cmd, args, false, nil, false)
+	return c.clientCmd(client, cmd, args, false, nil, 0)
 }
 
 func haveTried(tried map[string]bool, addr string) bool {
@@ -429,7 +437,7 @@ func justTried(tried map[string]bool, addr string) map[string]bool {
 
 func (c *Cluster) clientCmd(
 	client *redis.Client, cmd string, args []interface{}, ask bool,
-	tried map[string]bool, haveReset bool,
+	tried map[string]bool, haveReset int,
 ) *redis.Resp {
 	var err error
 	var r *redis.Resp
@@ -467,7 +475,7 @@ func (c *Cluster) clientCmd(
 			}
 		}
 		// Otherwise try calling Reset() and getting a random client
-		if !haveReset {
+		if haveReset < c.o.MaxRedirectCount {
 			if resetErr := c.Reset(); resetErr != nil {
 				return errorRespf("Could not get cluster info: %s", resetErr)
 			}
@@ -475,7 +483,7 @@ func (c *Cluster) clientCmd(
 			if getErr != nil {
 				return errorResp(getErr)
 			}
-			return c.clientCmd(client, cmd, args, false, tried, true)
+			return c.clientCmd(client, cmd, args, false, tried, haveReset+1)
 		}
 		// Otherwise give up and return the most recent error
 		return r
@@ -497,13 +505,13 @@ func (c *Cluster) clientCmd(
 		// If we've already called Reset and we're getting MOVED again than the
 		// cluster is having problems, likely telling us to try a node which is
 		// not reachable. Not much which can be done at this point
-		if haveReset {
+		if haveReset >= c.o.MaxRedirectCount {
 			return errorRespf("Cluster doesn't make sense, %s might be gone", addr)
 		}
 		if resetErr := c.Reset(); resetErr != nil {
 			return errorRespf("Could not get cluster info: %s", resetErr)
 		}
-		haveReset = true
+		haveReset++
 
 		// At this point addr is whatever redis told us it should be. However,
 		// if we can't get a connection to it we'll never actually mark it as
