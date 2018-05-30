@@ -96,9 +96,9 @@ type Opts struct {
 	// for new connections. Defaults to using redis.DialTimeout if not set.
 	Dialer DialFunc
 
-	// The max redirect count of cluster. Default is 2.
-	// If redis-nodes will work and do rebalance(moving slots) at the same time,
-	// configure a bigger number is a good choice.
+	// The maximimum number of times the cluster will allow a command to be
+	// redirected to another instance via a MOVED or ASK error before giving up
+	// on that command. Defaults to 2.
 	MaxRedirectCount int
 }
 
