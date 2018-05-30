@@ -285,3 +285,8 @@ func (c *Client) GetMaster(name string) (*redis.Client, error) {
 func (c *Client) PutMaster(name string, client *redis.Client) {
 	c.putCh <- &putReq{name, client}
 }
+
+// Close closes all connection pools as well as the connection to sentinel.
+func (c *Client) Close() {
+	close(c.closeCh)
+}
