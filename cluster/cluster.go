@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mediocregopher/radix.v2/pool"
-	"github.com/mediocregopher/radix.v2/redis"
+	"github.com/zcalex/radix.v2/pool"
+	"github.com/zcalex/radix.v2/redis"
 )
 
 type mapping [NumSlots]string
@@ -278,12 +278,14 @@ func (c *Cluster) resetInner() error {
 		c.resetThrottle = time.NewTicker(c.o.ResetThrottle)
 	}
 
-	p := c.getRandomPoolInner()
-	if p.Pool == nil {
-		return fmt.Errorf("no available nodes to call CLUSTER SLOTS on")
+	for _, p := range c.pools {
+		if p.Pool != nil {
+			if err := c.resetInnerUsingPool(p); err == nil {
+				return nil
+			}
+		}
 	}
-
-	return c.resetInnerUsingPool(p)
+	return fmt.Errorf("cluster not available slots")
 }
 
 func (c *Cluster) resetInnerUsingPool(p clusterPool) error {
@@ -291,7 +293,6 @@ func (c *Cluster) resetInnerUsingPool(p clusterPool) error {
 	// If we move the throttle check to be in here we'll have to fix the test in
 	// TestReset, since it depends on being able to call Reset right after
 	// initializing the cluster
-
 	client, err := p.Get()
 	if err != nil {
 		return err
@@ -414,6 +415,7 @@ func (c *Cluster) Cmd(cmd string, args ...interface{}) *redis.Resp {
 
 	client, err := c.getConn(key, "")
 	if err != nil {
+		c.Reset()
 		return errorResp(err)
 	}
 

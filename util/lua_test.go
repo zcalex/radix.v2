@@ -5,10 +5,10 @@ import (
 	"fmt"
 	. "testing"
 
-	"github.com/mediocregopher/radix.v2/cluster"
-	"github.com/mediocregopher/radix.v2/redis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zcalex/radix.v2/cluster"
+	"github.com/zcalex/radix.v2/redis"
 )
 
 // randTestScript returns a script, and a key and value which can be input into

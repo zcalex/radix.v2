@@ -5,8 +5,8 @@ import (
 	. "testing"
 
 	"github.com/levenlabs/golib/testutil"
-	"github.com/mediocregopher/radix.v2/cluster"
-	"github.com/mediocregopher/radix.v2/redis"
+	"github.com/zcalex/radix.v2/cluster"
+	"github.com/zcalex/radix.v2/redis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

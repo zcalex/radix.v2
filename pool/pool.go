@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/mediocregopher/radix.v2/redis"
+	"github.com/zcalex/radix.v2/redis"
 )
 
 var (
