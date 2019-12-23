@@ -53,9 +53,21 @@ type request struct {
 	args []interface{}
 }
 
+type dialOpts struct {
+	authPass string
+}
+
+type DialOptFunc func(*dialOpts)
+
+func AuthPass(authPass string) DialOptFunc {
+	return func(o *dialOpts) {
+		o.authPass = authPass
+	}
+}
+
 // DialTimeout connects to the given Redis server with the given timeout, which
 // will be used as the read/write timeout when communicating with redis
-func DialTimeout(network, addr string, timeout time.Duration) (*Client, error) {
+func DialTimeout(network, addr string, timeout time.Duration, opts ...DialOptFunc) (*Client, error) {
 	// establish a connection
 	conn, err := net.DialTimeout(network, addr, timeout)
 	if err != nil {
@@ -66,6 +78,20 @@ func DialTimeout(network, addr string, timeout time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var ops dialOpts
+	for _, o := range opts {
+		o(&ops)
+	}
+
+	if ops.authPass != "" {
+		rsp := client.Cmd("AUTH", ops.authPass)
+		if rsp.IsType(Err) {
+			client.Close()
+			return nil, rsp.Err
+		}
+	}
+
 	client.ReadTimeout = timeout
 	client.WriteTimeout = timeout
 	return client, nil
@@ -93,8 +119,8 @@ func NewClient(conn net.Conn) (*Client, error) {
 }
 
 // Dial connects to the given Redis server.
-func Dial(network, addr string) (*Client, error) {
-	return DialTimeout(network, addr, time.Duration(0))
+func Dial(network, addr string, opt ...DialOptFunc) (*Client, error) {
+	return DialTimeout(network, addr, time.Duration(0), opt...)
 }
 
 // Close closes the connection.

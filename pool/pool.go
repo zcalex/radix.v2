@@ -40,7 +40,7 @@ type Pool struct {
 }
 
 // DialFunc is a function which can be passed into NewCustom
-type DialFunc func(network, addr string) (*redis.Client, error)
+type DialFunc func(network, addr string, optFunc ...redis.DialOptFunc) (*redis.Client, error)
 
 // NewCustom is like New except you can specify a DialFunc which will be
 // used when creating new connections for the pool. The common use-case is to do
@@ -162,7 +162,7 @@ func NewCustom(network, addr string, size int, df DialFunc, os ...Opt) (*Pool, e
 	}
 
 	mkConn := func() error {
-		client, err := df(network, addr)
+		client, err := df(network, addr, po.toDialOpts()...)
 		if err == nil {
 			p.pool <- client
 		}
@@ -223,7 +223,7 @@ func (p *Pool) Get() (*redis.Client, error) {
 		case <-timeoutCh:
 			return nil, ErrGetTimeout
 		case <-p.limited:
-			return p.df(p.Network, p.Addr)
+			return p.df(p.Network, p.Addr, p.po.toDialOpts()...)
 		}
 	}
 }

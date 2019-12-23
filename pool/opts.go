@@ -1,6 +1,9 @@
 package pool
 
-import "time"
+import (
+	"github.com/zcalex/radix.v2/redis"
+	"time"
+)
 
 type opts struct {
 	pingInterval          time.Duration
@@ -9,6 +12,7 @@ type opts struct {
 	overflowDrainInterval time.Duration
 	overflowSize          int
 	getTimeout            time.Duration
+	authPass              string
 }
 
 // Opt is an optional behavior which can be applied to the NewCustom
@@ -85,4 +89,16 @@ func CreateLimit(headroom int, createInterval time.Duration) Opt {
 		po.createLimitBuffer = headroom
 		po.createLimitInterval = createInterval
 	}
+}
+
+func AuthPass(authPass string) Opt {
+	return func(po *opts) {
+		po.authPass = authPass
+	}
+}
+
+func (o *opts) toDialOpts() []redis.DialOptFunc {
+	var dialOpts []redis.DialOptFunc
+	dialOpts = append(dialOpts, redis.AuthPass(o.authPass))
+	return dialOpts
 }

@@ -41,7 +41,7 @@ var (
 
 // DialFunc is a function which can be incorporated into Opts. Note that network
 // will always be "tcp" in Cluster.
-type DialFunc func(network, addr string) (*redis.Client, error)
+type DialFunc func(network, addr string, opts ...redis.DialOptFunc) (*redis.Client, error)
 
 // Cluster wraps a Client and accounts for all redis cluster logic
 type Cluster struct {
@@ -70,6 +70,9 @@ type Opts struct {
 
 	// Required. The address of a single node in the cluster
 	Addr string
+
+	// 密码
+	AuthPass string
 
 	// Read and write timeout which should be used on individual redis clients.
 	// Default is to not set the timeout and let the connection use it's
@@ -100,6 +103,12 @@ type Opts struct {
 	// redirected to another instance via a MOVED or ASK error before giving up
 	// on that command. Defaults to 2.
 	MaxRedirectCount int
+}
+
+func (o *Opts) toDialOpts() []redis.DialOptFunc {
+	var dialOpts []redis.DialOptFunc
+	dialOpts = append(dialOpts, redis.AuthPass(o.AuthPass))
+	return dialOpts
 }
 
 // New will perform the following steps to initialize:
@@ -134,13 +143,15 @@ func NewWithOpts(o Opts) (*Cluster, error) {
 		o.ResetThrottle = 500 * time.Millisecond
 	}
 	if o.Dialer == nil {
-		o.Dialer = func(_, addr string) (*redis.Client, error) {
-			return redis.DialTimeout("tcp", addr, o.Timeout)
+		o.Dialer = func(_, addr string, opts ...redis.DialOptFunc) (*redis.Client, error) {
+			return redis.DialTimeout("tcp", addr, o.Timeout, o.toDialOpts()...)
 		}
 	}
 	if o.MaxRedirectCount == 0 {
 		o.MaxRedirectCount = 2
 	}
+
+	o.PoolOpts = append(o.PoolOpts, pool.AuthPass(o.AuthPass))
 
 	c := Cluster{
 		o:             o,
@@ -178,8 +189,8 @@ func (c *Cluster) newPool(addr string, clearThrottle bool) (clusterPool, error) 
 		}
 	}
 
-	df := func(network, addr string) (*redis.Client, error) {
-		return c.o.Dialer(network, addr)
+	df := func(network, addr string, op ...redis.DialOptFunc) (*redis.Client, error) {
+		return c.o.Dialer(network, addr, op...)
 	}
 	p, err := pool.NewCustom("tcp", addr, c.o.PoolSize, df, c.o.PoolOpts...)
 	if err != nil {
